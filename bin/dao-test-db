@@ -7,9 +7,9 @@ TEST_DB_CONTAINER=dao-endpoint-test-db
 # additional sub-expressions to split authority into userinfo, user, password, host and port
 #
 readonly URI_REGEX='^(([^:/?#]+):)?(//(((([^:/?#]+)(:([^@]+))?)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
-#                    ↑↑            ↑  ↑↑↑↑       ↑ ↑              ↑         ↑ ↑            ↑ ↑        ↑  ↑        ↑ ↑
-#                    |2 scheme     |  ||||       | 9 password     10 host   | 12 port      | 14 rpath |  16 query | 18 fragment
-#                    1 scheme:     |  ||||       8 :password                11 :…          13 path    15 ?…       17 #…
+#                    ↑↑            ↑  ↑↑↑↑         ↑ ↑            ↑         ↑ ↑            ↑ ↑        ↑  ↑        ↑ ↑
+#                    |2 scheme     |  ||||         | 9 password   10 host   | 12 port      | 14 rpath |  16 query | 18 fragment
+#                    1 scheme:     |  ||||         8 :password              11 :…          13 path    15 ?…       17 #…
 #                                  |  |||7 user
 #                                  |  ||6 userinfo
 #                                  |  |5 userinfo@
