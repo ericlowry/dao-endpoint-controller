@@ -22,6 +22,14 @@ const listQueryParser = (req, _, next) => {
   next();
 };
 
+// sanitize validation errors for the client
+const exportErrors = ({ errors }) =>
+  errors.map(e => ({
+    name: e.name,     // "required"
+    arg: e.argument,  // "_id"
+    msg: e.message,   // "field _id is required"
+  }));
+
 module.exports = dao => {
   const router = express.Router();
 
@@ -29,19 +37,14 @@ module.exports = dao => {
   // POST {router}/ - create a new doc (CREATE)
   //
   router.post('/', async (req, res) => {
-    if (!Object.keys(req.body).length)
-      throw new NotAcceptable('missing body');
+    if (!Object.keys(req.body).length) throw new NotAcceptable('missing body');
 
     const newDoc = dao.touch({ _id: dao.uuid(), ...req.body }, req.ctx.id);
     const check = dao.validate(newDoc);
     if (!check.valid) {
-      check.errors.forEach(err => debug(`req.body ${err.message}`));
+      // check.errors.forEach(err => debug(`req.body ${err.message}`));
       const err = new NotAcceptable(`Invalid ${dao.type}`);
-      err.errors = check.errors.map(e => ({
-        name: e.name,
-        arg: e.argument,
-        msg: e.message,
-      }));
+      err.errors = exportErrors(check);
       throw err;
     }
     const finalDoc = await dao.create(newDoc);
@@ -68,12 +71,15 @@ module.exports = dao => {
   //
   // PATCH {router}/:id - modify a doc (UPDATE)
   //
+  // Note:req.body is the current document with changes
+  //
   router.patch('/:id', async (req, res) => {
     const modifiedDoc = dao.touch({ ...req.body }, req.ctx.id);
     const check = dao.validate(modifiedDoc);
     if (!check.valid) {
-      check.errors.forEach(err => debug(`req.body ${err.message}`));
-      throw new NotAcceptable();
+      const err = new NotAcceptable('document contains errors');
+      err.errors = exportErrors(check);
+      throw err;
     }
     const finalDoc = await dao.update(req.params.id, modifiedDoc);
     res.send(finalDoc);
