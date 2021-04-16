@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+TEST_DB_CONTAINER=dao-endpoint-test-db
+
+#
+# Following regex is based on https://tools.ietf.org/html/rfc3986#appendix-B with
+# additional sub-expressions to split authority into userinfo, user, password, host and port
+#
+readonly URI_REGEX='^(([^:/?#]+):)?(//(((([^:/?#]+)(:([^@]+))?)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
+#                    ↑↑            ↑  ↑↑↑↑       ↑ ↑              ↑         ↑ ↑            ↑ ↑        ↑  ↑        ↑ ↑
+#                    |2 scheme     |  ||||       | 9 password     10 host   | 12 port      | 14 rpath |  16 query | 18 fragment
+#                    1 scheme:     |  ||||       8 :password                11 :…          13 path    15 ?…       17 #…
+#                                  |  |||7 user
+#                                  |  ||6 userinfo
+#                                  |  |5 userinfo@
+#                                  |  4 authority
+#                                  3 //…
+
+if [[ "$COUCHDB" =~ $URI_REGEX ]]; then
+
+  COUCHDB_USER=${BASH_REMATCH[7]}
+  COUCHDB_PASSWORD=${BASH_REMATCH[9]}
+  COUCHDB_PUBLISH=${BASH_REMATCH[12]}
+
+  exists=$(docker ps --filter "name=^/${TEST_DB_CONTAINER}$" --format '{{.Names}}')
+
+  if [[ "${exists}" != "${TEST_DB_CONTAINER}" ]]; then
+
+    echo "Starting ${TEST_DB_CONTAINER}"
+
+    docker run -it \
+      --rm \
+      -e COUCHDB_USER=${COUCHDB_USER} \
+      -e COUCHDB_PASSWORD=${COUCHDB_PASSWORD} \
+      --detach \
+      --name ${TEST_DB_CONTAINER} \
+      --publish ${COUCHDB_PUBLISH}:5984 \
+      couchdb:3.1.1
+
+    max_attempts=150 # 30 seconds seems like enough...
+    attempts=0
+    until curl http://localhost:${COUCHDB_PUBLISH} \
+      --silent \
+      --user ${COUCHDB_USER}:${COUCHDB_PASSWORD} >/dev/null; do
+      sleep .2
+      [[ $attempts -eq $max_attempts ]] && echo "DB Never Came Up" && exit 1
+      ((attempts++))
+    done
+
+    # set the cluster mode
+    curl http://localhost:${COUCHDB_PUBLISH}/_cluster_setup \
+      --silent \
+      --user ${COUCHDB_USER}:${COUCHDB_PASSWORD} \
+      -H 'Content-Type: application/json' \
+      --data-binary @- <<EOF
+{
+  "action":"enable_single_node",
+  "singlenode":true,
+  "bind_address":"0.0.0.0",
+  "username":"${COUCHDB_USER}",
+  "password":"${COUCHDB_PASSWORD}"
+}
+EOF
+
+    # set cluster n = 1
+    curl -X PUT \
+      http://localhost:${COUCHDB_PUBLISH}/_node/_local/_config/cluster/n -d '"1"' \
+      --user ${COUCHDB_USER}:${COUCHDB_PASSWORD}
+
+    # Timeout after 8 hours
+    curl -X PUT \
+      http://localhost:${COUCHDB_PUBLISH}/_node/_local/_config/couch_httpd_auth/timeout -d '"28800"' \
+      --user ${COUCHDB_USER}:${COUCHDB_PASSWORD}
+
+    echo "test db ready"
+
+  else
+
+    #
+    # the container is already up...
+    #
+
+    curl http://localhost:${COUCHDB_PUBLISH} \
+      --silent \
+      --user ${COUCHDB_USER}:${COUCHDB_PASSWORD} >/dev/null
+
+    if [ $? -ne 0 ]; then
+      echo "container ${TEST_DB_CONTAINER} is not responding on http://localhost:${COUCHDB_PUBLISH}"
+      port=$(docker inspect --format='{{(index (index .NetworkSettings.Ports "5984/tcp") 0).HostPort}}' $TEST_DB_CONTAINER)
+      echo "Note: container thinks 5984 is mapped to ${port}"
+      exit 1
+    fi
+  fi
+
+else
+
+  #
+  # unable to parse COUCHDB
+  #
+  if [ -z "$COUCHDB" ]; then
+    echo $"COUCHDB environment is missing"
+  else
+    echo $"COUCHDB environment (${COUCHDB}) is an invalid URL"
+  fi
+  exit 1
+
+fi
